@@ -7,7 +7,7 @@ avoid repetitive if-statement and None checking patterns.
 
 ## Advanced
 
-The `SessionObject` decorator allows makes it easier to work with Python identifiers as containers
+The `SessionObject` decorator makes it easier to work with Python identifiers as containers
 of session state instead of passing around String keys to `get_state()` or `set_state()`.
 
 E.g. the simplest usage might be:
@@ -26,11 +26,14 @@ Then:
 4. Set the state value to `None` with `result.clear()`.
 5. Or `result.init(2)` which calls `result(2)` only if there isn't a value in the session state already.
 
-But the `SessionObject` provides other utilities like cleanup functions and history if configured.
+But the `SessionObject` provides other utilities like cleanup functions and history if configured. 
+And the body of the function can do any processing on the inputs before returning the final 
+session state value.
 
 ```python
 @SessionObject("result", history_size=10, cleanup_func=cleanup)
 def result(val):
+    # any amount of processing before final val
     return val
 ```
 
