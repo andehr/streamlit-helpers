@@ -1,3 +1,7 @@
+# Install
+
+`pip install streamlithelpers`
+
 # Session state helpers
 
 ## Basic
