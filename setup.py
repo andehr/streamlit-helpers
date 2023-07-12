@@ -3,13 +3,13 @@ from distutils.core import setup
 setup(
     name='streamlithelpers',
     packages=['streamlithelpers'],
-    version='0.1.2',
+    version='0.1.3',
     license='MIT',
     description='Simple utilities to help streamlit app development',
     author='Andrew Robertson',
     author_email='',
     url='https://github.com/andehr/streamlit-helpers',
-    download_url='https://github.com/andehr/streamlit-helpers/archive/refs/tags/v0.1.2.tar.gz',
+    download_url='https://github.com/andehr/streamlit-helpers/archive/refs/tags/v0.1.3.tar.gz',
     keywords=['streamlit', 'utility'],
     install_requires=[
         'pandas',
