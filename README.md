@@ -1,3 +1,7 @@
+# Install
+
+`pip install streamlithelpers`
+
 # Session state helpers
 
 ## Basic
@@ -42,6 +46,9 @@ And `cleanup(result.get())` is run first when `result.clear()` is called if `res
 
 # Widget helpers
 
+Some functions are provided which display one or more streamlit widgets to support common workflows.
+They all start with `st_`.
+
 ## Downloading
 Currently, if you make a download button with Streamlit, the contents must already be in memory, 
 so below are some helpers for dealing with that.
@@ -60,8 +67,8 @@ function relies on a library function that writes to file.
 `st_status(message, type)` : displays a status message in a colour appropriate to a specified type (error/warn/info/success)
 with an appropriate icon.
 
-`st_source_code(obj)` : uses a python language `st.code` (which accepts a String of code only) 
-widget to display the source code of the specified object using Pythons `inspect.getsource()`.
+`st_source_code(obj)` : the streamlit widget `st.code()` will display only a String literal representing some code. This function
+takes any Python object, finds its source code via Python's `inspect.getsource()` and displays that code.
 
 `st_code_editor` : display a code editor backed by `st_ace` library, but doing some annoying defaults,
 like making sure initial state is empty string not `None`, and that state is initialised.
