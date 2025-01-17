@@ -14,7 +14,7 @@ setup(
     install_requires=[
         'pandas',
         'streamlit',
-        'streamlit-extras'
+        'streamlit-extras',
         'streamlit-ace'
     ],
     classifiers=[
