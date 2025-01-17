@@ -177,6 +177,87 @@ class SessionObject:
         wrapper.history = history
         return wrapper
 
+
+def st_stateful(widget_func, prop, obj, post_change: Callable = None, change_args: tuple[Any, ...] = None,
+                change_kwargs: dict[str, Any] = None, **kwargs):
+    """
+    Given a streamlit widget function, a property name and a reference to a SessionObject value on which the property
+    value belongs, create a stateful widget that will store the value of the widget in the SessionObject property, and
+    set itself to the value of the property even between page switches, by using an explicit session state property for
+    the widget.
+
+    :param widget_func: The streamlit widget function to use (e.g. st.checkbox, st.selectbox, etc.)
+    :param prop: The name of a property on an object that is stored using SesssionObject
+    :param obj: The object with the above property (that is stored using SessionObject)
+    :param kwargs: The keyword arguments to pass to the widget function
+
+    :param post_change: A function to run after the widget value has changed
+    :param change_args: The arguments to pass to the post_change function
+    :param change_kwargs: The keyword arguments to pass to the post_change function
+
+    NOTE:
+      1. on_change, value and index parameters of the widget function are set by this function and should therefore not be passed in kwargs.
+      2. You can set the label of your widget by passing a 'label' parameter in kwargs, or as the first argument in args.
+      3. The default session state key is a combination of the object name, the property name and the widget function name, but you can pass a key parameter in kwargs to override this.
+
+    Usage example:
+        ```
+        @SessionObject("my_session_object")
+        def session_user_defined(value: UserDefined) -> UserDefined:
+            return value
+
+        # initialise if necessary
+        session_user_defined.init(UserDefined())
+
+        # get current value of the session object
+        current_value = session_user_defined.get()
+
+        # create a stateful checkbox widget that will store its value in the example 'enabled' property of the UserDefined object
+        current_value = st_stateful(st.checkbox, "enabled", current_value, label="Enable feature")
+        ```
+
+    Then you can either access the value using current_value.enabled, or by assigning the result of the st_stateful call
+
+    TODO: can all the default stuff be done by setting the session state value when None?
+    """
+
+    session_state_key = kwargs.pop("key", f"{type(obj).__name__}_{prop}_{widget_func.__name__}")
+
+    def store_prop():
+        """
+        Function sets the value of the SessionObject's property to the value of the widget.
+        This function will run on the on_change event of the widget before refresh
+        """
+        current_val = st.session_state[session_state_key]
+        setattr(obj, prop, current_val)
+
+        if post_change is not None:
+            post_change(current_val, *(change_args or ()), **(change_kwargs or {}))
+
+    # if the args list is empty and no label is specified in kwargs, use the property name as the label
+    if "label" not in kwargs:
+        kwargs["label"] = prop
+
+    # if the widget is a selectbox or radio (i.e. a widget requiring the 'options' param), try to set the index of the widget (i.e. default value) to the index of the current value of the property in question
+    if widget_func.__name__ in {"selectbox", "radio"}:
+        try:
+            kwargs["index"] = kwargs.get("options").index(getattr(obj, prop))
+        except ValueError:
+            # if the current value of the property is not in the options list, set the index to 0 and update the object's property to that value
+            if kwargs.get("options", []):
+                kwargs["index"] = 0
+                setattr(obj, prop, kwargs.get("options")[0])
+    # if the widget is a segmented control
+    elif widget_func.__name__ in {"segmented_control"}:
+        kwargs["default"] = getattr(obj, prop)
+    # otherwise, set the value parameter of the widget directly to the value of the property of the SessionObject
+    else:
+        kwargs["value"] = getattr(obj, prop)
+
+    # returns the value of the widget, and sets the value of the widget to the value of the property of the SessionObject
+    return widget_func(key=session_state_key, on_change=store_prop, **kwargs)
+
+
 ###################################
 # Widget helpers
 ###################################
