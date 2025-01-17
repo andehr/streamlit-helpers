@@ -1,12 +1,14 @@
 import inspect
 import os
 import tempfile
+from contextlib import contextmanager
 from functools import wraps
 from typing import TypeVar, Optional, Callable, List, Literal, Any
 
 import pandas as pd
 import streamlit as st
 from streamlit_ace import st_ace
+from streamlit_extras.stylable_container import stylable_container
 
 T = TypeVar("T")
 StatusType = Literal["info", "warn", "error", "success"]
@@ -21,6 +23,15 @@ def init_state(name: str, value: T) -> T:
     """
     if name not in st.session_state:
         st.session_state[name] = value
+    return st.session_state[name]
+
+
+def init_state_with_callable(name: str, func: Callable[[], T]) -> T:
+    """
+    If 'name' is not already in session state, initialise it to the result of calling 'func'. Return its resulting value in the session.
+    """
+    if name not in st.session_state:
+        st.session_state[name] = func()
     return st.session_state[name]
 
 
@@ -166,6 +177,87 @@ class SessionObject:
         wrapper.history = history
         return wrapper
 
+
+def st_stateful(widget_func, prop, obj, post_change: Callable = None, change_args: tuple[Any, ...] = None,
+                change_kwargs: dict[str, Any] = None, **kwargs):
+    """
+    Given a streamlit widget function, a property name and a reference to a SessionObject value on which the property
+    value belongs, create a stateful widget that will store the value of the widget in the SessionObject property, and
+    set itself to the value of the property even between page switches, by using an explicit session state property for
+    the widget.
+
+    :param widget_func: The streamlit widget function to use (e.g. st.checkbox, st.selectbox, etc.)
+    :param prop: The name of a property on an object that is stored using SesssionObject
+    :param obj: The object with the above property (that is stored using SessionObject)
+    :param kwargs: The keyword arguments to pass to the widget function
+
+    :param post_change: A function to run after the widget value has changed
+    :param change_args: The arguments to pass to the post_change function
+    :param change_kwargs: The keyword arguments to pass to the post_change function
+
+    NOTE:
+      1. on_change, value and index parameters of the widget function are set by this function and should therefore not be passed in kwargs.
+      2. You can set the label of your widget by passing a 'label' parameter in kwargs, or as the first argument in args.
+      3. The default session state key is a combination of the object name, the property name and the widget function name, but you can pass a key parameter in kwargs to override this.
+
+    Usage example:
+        ```
+        @SessionObject("my_session_object")
+        def session_user_defined(value: UserDefined) -> UserDefined:
+            return value
+
+        # initialise if necessary
+        session_user_defined.init(UserDefined())
+
+        # get current value of the session object
+        current_value = session_user_defined.get()
+
+        # create a stateful checkbox widget that will store its value in the example 'enabled' property of the UserDefined object
+        current_value = st_stateful(st.checkbox, "enabled", current_value, label="Enable feature")
+        ```
+
+    Then you can either access the value using current_value.enabled, or by assigning the result of the st_stateful call
+
+    TODO: can all the default stuff be done by setting the session state value when None?
+    """
+
+    session_state_key = kwargs.pop("key", f"{type(obj).__name__}_{prop}_{widget_func.__name__}")
+
+    def store_prop():
+        """
+        Function sets the value of the SessionObject's property to the value of the widget.
+        This function will run on the on_change event of the widget before refresh
+        """
+        current_val = st.session_state[session_state_key]
+        setattr(obj, prop, current_val)
+
+        if post_change is not None:
+            post_change(current_val, *(change_args or ()), **(change_kwargs or {}))
+
+    # if the args list is empty and no label is specified in kwargs, use the property name as the label
+    if "label" not in kwargs:
+        kwargs["label"] = prop
+
+    # if the widget is a selectbox or radio (i.e. a widget requiring the 'options' param), try to set the index of the widget (i.e. default value) to the index of the current value of the property in question
+    if widget_func.__name__ in {"selectbox", "radio"}:
+        try:
+            kwargs["index"] = kwargs.get("options").index(getattr(obj, prop))
+        except ValueError:
+            # if the current value of the property is not in the options list, set the index to 0 and update the object's property to that value
+            if kwargs.get("options", []):
+                kwargs["index"] = 0
+                setattr(obj, prop, kwargs.get("options")[0])
+    # if the widget is a segmented control
+    elif widget_func.__name__ in {"segmented_control"}:
+        kwargs["default"] = getattr(obj, prop)
+    # otherwise, set the value parameter of the widget directly to the value of the property of the SessionObject
+    else:
+        kwargs["value"] = getattr(obj, prop)
+
+    # returns the value of the widget, and sets the value of the widget to the value of the property of the SessionObject
+    return widget_func(key=session_state_key, on_change=store_prop, **kwargs)
+
+
 ###################################
 # Widget helpers
 ###################################
@@ -230,13 +322,13 @@ def st_status(message: str, status_type: StatusType):
     if status_type not in {"info", "warn", "error", "success"}:
         raise ValueError(f"Invalid status type: {status_type}")
     if status_type == "info":
-        st.info(message, icon="ℹ️")
+        st.info(message, icon=":material/info:")
     elif status_type == "warn":
-        st.warning(message, icon="⚠️")
+        st.warning(message, icon=":material/️warning:")
     elif status_type == "error":
-        st.error(message, icon="❌")
+        st.error(message, icon=":material/error:")
     elif status_type == "success":
-        st.success(message, icon="✅")
+        st.success(message, icon=":material/check:")
 
 
 def st_source_code(obj):
@@ -258,3 +350,189 @@ def st_code_editor(key: str, value=None, placeholder: str = "", **kwargs) -> str
     init_state(key, value if value is not None else "")
     code = st_ace(value=get_state(key), key=key, placeholder=placeholder, **kwargs)
     return code if code is not None else placeholder
+
+def toast_success(msg: str):
+    """ Display a success toast message. """
+    st.toast(msg, icon=":material/check:")
+
+
+def toast_warning(msg: str):
+    """ Display a warning toast message. """
+    st.toast(msg, icon=":material/warning:")
+
+
+def toast_error(msg: str):
+    """ Display an error toast message. """
+    st.toast(msg, icon=":material/error:")
+
+
+def toast_refreshed():
+    """ Display a success toast message for a successful refresh. """
+    toast_success("Refreshed")
+
+
+def color_text(text: str, color: str) -> str:
+    """ Color the text with the given color (requires st.markdown to display) """
+    return f":{color}[{text}]"
+
+
+def primary_text(text: str) -> str:
+    """ Color the text with the primary color of the current streamlit theme """
+    return color_text(text, "primary")
+
+
+def st_widget_caption(text: str):
+    """
+    Hack to create a caption in the styling of other widget labels, instead of the normal caption text.
+    This means you can caption whole sets of widgets with a single caption in the position you desire
+    instead of directly above only one widget.
+    """
+    st.caption(f'<p style="color:rgb(49, 51, 63);">{text}</p>', unsafe_allow_html=True)
+
+
+def st_multiselect_with_additional_controls(init_val: list = None,
+                                            control_gap: Literal["small", "medium", "large"] = "small",
+                                            picker_dialog: Callable[[str], list] = None,
+                                            **multiselect_kwargs):
+    """
+    A multiselect widget with additional controls to select all or deselect all options.
+    Keywords args are parsed to the underlying multiselect. In particular, you should
+    specify:
+    - label: The label for the multiselect
+    - key: The key for the multiselect (used to built the key for the toggle buttons too)
+    - options: The list of options for the multiselect
+    Any additional args are passed through.
+    """
+    label = multiselect_kwargs.pop("label", "Select options")
+    key = multiselect_kwargs.pop("key", label)
+    options = multiselect_kwargs.pop("options", [])
+
+    if init_val and key not in st.session_state:
+        st.session_state[key] = init_val
+
+    def select_all():
+        st.session_state[key] = options
+
+    def deselect_all():
+        st.session_state[key] = []
+
+    st_widget_caption(label)
+    control_cols = st.columns(3 if picker_dialog else 2, gap=control_gap)
+    control_cols[0].button("All", on_click=select_all, icon=":material/select_all:", use_container_width=True, key=f"{key}_select_all", help="Select all options")
+    control_cols[1].button("None", on_click=deselect_all, icon=":material/deselect:", use_container_width=True, key=f"{key}_deselect_all", help="Deselect all options")
+    if picker_dialog:
+        if control_cols[2].button("Picker", icon=":material/gesture_select:", use_container_width=True, key=f"{key}_picker_dialog", help="Batch select options in a dialog overlay window."):
+            picker_dialog(key)
+    return st.multiselect(label, options=options, key=key, label_visibility="collapsed", **multiselect_kwargs)
+
+
+@contextmanager
+def st_container_right_aligned(key: str):
+    """
+    Context manager to create a container with right-aligned text.
+    """
+    with stylable_container(key=key, css_styles="""
+    {
+        text-align: right;
+    }
+    """):
+        yield
+
+
+@st.dialog("Confirmation required")
+def st_dialog_confirmation(on_confirm: Callable,
+                           streamlit_write_func: Callable = None,
+                           action_loading_text: str = "Loading...",
+                           cancel_text: str = "Cancel",
+                           confirm_text: str = "Confirm",
+                           on_confirm_args: tuple | None = None,
+                           on_config_kwargs: dict | None = None):
+    """
+    Display a dialog modal to confirm an action before proceeding.
+    :param on_confirm: The function to call when the user clicks the confirm button
+    :param streamlit_write_func: The function to call to display any content in the modal using stremalit widgets
+    :param action_loading_text: The text to display in the spinner while the action is being performed
+    :param cancel_text: The text to display on the cancel button
+    :param confirm_text: The text to display on the confirm button
+    :param on_confirm_args: The arguments to pass to the on_confirm function
+    :param on_config_kwargs: The keyword arguments to pass to the on_confirm function
+    """
+    if streamlit_write_func is not None:
+        streamlit_write_func()
+    else:
+        st.write("Are you sure?")
+    cancel_col, confirm_col = st.columns(2)
+    if cancel_col.button(cancel_text, use_container_width=True):
+        st.rerun()
+    if confirm_col.button(confirm_text, type="primary", use_container_width=True):
+        with st.spinner(action_loading_text):
+            args = on_confirm_args or ()
+            kwargs = on_config_kwargs or {}
+            on_confirm(*args, **kwargs)
+        st.rerun()
+
+
+def st_multiselect_accepts_new(input_widget_func, label: str,
+                               session_object_list_prop: list[Any],
+                               key: str = None,
+                               keep_duplicates: bool = False,
+                               column_layout: list[int | float] | None = None,
+                               input_widget_kwargs: dict[str, Any] = None,
+                               multiselect_widget_kwargs: dict[str, Any] = None) -> list[str]:
+    """
+    A widget made from three streamlit components to basically allow a user to input new values into a multiselect-like
+    widget. The user enters new values in the passed input_widget_func (e.g. st.text_input), then
+    clicks the "+" button. The new value is added to the existing values in the segemented control widget.
+    Existing values can be removed by clicking them in the segmented control
+
+    The output of this function is the final selection of values.
+
+    The session_object_list_prop is a list that will be modified in place to store the selected values,
+    so it should be a list that is a field on a streamlit SessionObject.
+
+    You can pass kwargs to the input widget using a dict as input_widget_kwargs, and to the multiselect widget using
+    multiselect_widget_kwargs.
+
+    """
+    if not key:
+        key = label
+    if not column_layout:
+        column_layout = [0.35, 0.05, 0.6]
+
+    add_new_key = f"{key}_add_new"
+    button_key = f"{add_new_key}_button"
+
+    # Get the existing values in the list
+    def get_existing():
+        return session_object_list_prop
+
+    # Add to the list when people click on the add button after entering a new value
+    def update_existing():
+        new_val = st.session_state[add_new_key] if add_new_key in st.session_state else None
+        if new_val is not None:
+            current = get_existing()
+            if keep_duplicates or new_val not in current:
+                current.append(new_val)
+
+    # Delete from the list when people click on the segmented control
+    def delete_existing():
+        if key in st.session_state:
+            existing = st.session_state[key]
+            if current := get_existing():
+                current.remove(existing)
+
+    input_col, button_col, selected_col = st.columns(column_layout, gap="small", vertical_alignment="bottom")
+    with input_col:
+        input_widget_func(label=f"Add {label}", key=add_new_key, **(input_widget_kwargs or {}))
+    with button_col:
+        st.button(":material/add:", key=button_key, on_click=update_existing, use_container_width=True)
+    with selected_col:
+        existing_values = get_existing()
+        if existing_values:
+            st.segmented_control(label, selection_mode="single",
+                                 on_change=delete_existing,
+                                 options=existing_values, key=key, **(multiselect_widget_kwargs or {}))
+        else:
+            st.warning("No values selected")
+
+    return existing_values
