@@ -1,12 +1,14 @@
 import inspect
 import os
 import tempfile
+from contextlib import contextmanager
 from functools import wraps
 from typing import TypeVar, Optional, Callable, List, Literal, Any
 
 import pandas as pd
 import streamlit as st
 from streamlit_ace import st_ace
+from streamlit_extras.stylable_container import stylable_container
 
 T = TypeVar("T")
 StatusType = Literal["info", "warn", "error", "success"]
@@ -21,6 +23,15 @@ def init_state(name: str, value: T) -> T:
     """
     if name not in st.session_state:
         st.session_state[name] = value
+    return st.session_state[name]
+
+
+def init_state_with_callable(name: str, func: Callable[[], T]) -> T:
+    """
+    If 'name' is not already in session state, initialise it to the result of calling 'func'. Return its resulting value in the session.
+    """
+    if name not in st.session_state:
+        st.session_state[name] = func()
     return st.session_state[name]
 
 
@@ -230,13 +241,13 @@ def st_status(message: str, status_type: StatusType):
     if status_type not in {"info", "warn", "error", "success"}:
         raise ValueError(f"Invalid status type: {status_type}")
     if status_type == "info":
-        st.info(message, icon="ℹ️")
+        st.info(message, icon=":material/info:")
     elif status_type == "warn":
-        st.warning(message, icon="⚠️")
+        st.warning(message, icon=":material/️warning:")
     elif status_type == "error":
-        st.error(message, icon="❌")
+        st.error(message, icon=":material/error:")
     elif status_type == "success":
-        st.success(message, icon="✅")
+        st.success(message, icon=":material/check:")
 
 
 def st_source_code(obj):
@@ -258,3 +269,189 @@ def st_code_editor(key: str, value=None, placeholder: str = "", **kwargs) -> str
     init_state(key, value if value is not None else "")
     code = st_ace(value=get_state(key), key=key, placeholder=placeholder, **kwargs)
     return code if code is not None else placeholder
+
+def toast_success(msg: str):
+    """ Display a success toast message. """
+    st.toast(msg, icon=":material/check:")
+
+
+def toast_warning(msg: str):
+    """ Display a warning toast message. """
+    st.toast(msg, icon=":material/warning:")
+
+
+def toast_error(msg: str):
+    """ Display an error toast message. """
+    st.toast(msg, icon=":material/error:")
+
+
+def toast_refreshed():
+    """ Display a success toast message for a successful refresh. """
+    toast_success("Refreshed")
+
+
+def color_text(text: str, color: str) -> str:
+    """ Color the text with the given color (requires st.markdown to display) """
+    return f":{color}[{text}]"
+
+
+def primary_text(text: str) -> str:
+    """ Color the text with the primary color of the current streamlit theme """
+    return color_text(text, "primary")
+
+
+def st_widget_caption(text: str):
+    """
+    Hack to create a caption in the styling of other widget labels, instead of the normal caption text.
+    This means you can caption whole sets of widgets with a single caption in the position you desire
+    instead of directly above only one widget.
+    """
+    st.caption(f'<p style="color:rgb(49, 51, 63);">{text}</p>', unsafe_allow_html=True)
+
+
+def st_multiselect_with_additional_controls(init_val: list = None,
+                                            control_gap: Literal["small", "medium", "large"] = "small",
+                                            picker_dialog: Callable[[str], list] = None,
+                                            **multiselect_kwargs):
+    """
+    A multiselect widget with additional controls to select all or deselect all options.
+    Keywords args are parsed to the underlying multiselect. In particular, you should
+    specify:
+    - label: The label for the multiselect
+    - key: The key for the multiselect (used to built the key for the toggle buttons too)
+    - options: The list of options for the multiselect
+    Any additional args are passed through.
+    """
+    label = multiselect_kwargs.pop("label", "Select options")
+    key = multiselect_kwargs.pop("key", label)
+    options = multiselect_kwargs.pop("options", [])
+
+    if init_val and key not in st.session_state:
+        st.session_state[key] = init_val
+
+    def select_all():
+        st.session_state[key] = options
+
+    def deselect_all():
+        st.session_state[key] = []
+
+    st_widget_caption(label)
+    control_cols = st.columns(3 if picker_dialog else 2, gap=control_gap)
+    control_cols[0].button("All", on_click=select_all, icon=":material/select_all:", use_container_width=True, key=f"{key}_select_all", help="Select all options")
+    control_cols[1].button("None", on_click=deselect_all, icon=":material/deselect:", use_container_width=True, key=f"{key}_deselect_all", help="Deselect all options")
+    if picker_dialog:
+        if control_cols[2].button("Picker", icon=":material/gesture_select:", use_container_width=True, key=f"{key}_picker_dialog", help="Batch select options in a dialog overlay window."):
+            picker_dialog(key)
+    return st.multiselect(label, options=options, key=key, label_visibility="collapsed", **multiselect_kwargs)
+
+
+@contextmanager
+def st_container_right_aligned(key: str):
+    """
+    Context manager to create a container with right-aligned text.
+    """
+    with stylable_container(key=key, css_styles="""
+    {
+        text-align: right;
+    }
+    """):
+        yield
+
+
+@st.dialog("Confirmation required")
+def st_dialog_confirmation(on_confirm: Callable,
+                           streamlit_write_func: Callable = None,
+                           action_loading_text: str = "Loading...",
+                           cancel_text: str = "Cancel",
+                           confirm_text: str = "Confirm",
+                           on_confirm_args: tuple | None = None,
+                           on_config_kwargs: dict | None = None):
+    """
+    Display a dialog modal to confirm an action before proceeding.
+    :param on_confirm: The function to call when the user clicks the confirm button
+    :param streamlit_write_func: The function to call to display any content in the modal using stremalit widgets
+    :param action_loading_text: The text to display in the spinner while the action is being performed
+    :param cancel_text: The text to display on the cancel button
+    :param confirm_text: The text to display on the confirm button
+    :param on_confirm_args: The arguments to pass to the on_confirm function
+    :param on_config_kwargs: The keyword arguments to pass to the on_confirm function
+    """
+    if streamlit_write_func is not None:
+        streamlit_write_func()
+    else:
+        st.write("Are you sure?")
+    cancel_col, confirm_col = st.columns(2)
+    if cancel_col.button(cancel_text, use_container_width=True):
+        st.rerun()
+    if confirm_col.button(confirm_text, type="primary", use_container_width=True):
+        with st.spinner(action_loading_text):
+            args = on_confirm_args or ()
+            kwargs = on_config_kwargs or {}
+            on_confirm(*args, **kwargs)
+        st.rerun()
+
+
+def st_multiselect_accepts_new(input_widget_func, label: str,
+                               session_object_list_prop: list[Any],
+                               key: str = None,
+                               keep_duplicates: bool = False,
+                               column_layout: list[int | float] | None = None,
+                               input_widget_kwargs: dict[str, Any] = None,
+                               multiselect_widget_kwargs: dict[str, Any] = None) -> list[str]:
+    """
+    A widget made from three streamlit components to basically allow a user to input new values into a multiselect-like
+    widget. The user enters new values in the passed input_widget_func (e.g. st.text_input), then
+    clicks the "+" button. The new value is added to the existing values in the segemented control widget.
+    Existing values can be removed by clicking them in the segmented control
+
+    The output of this function is the final selection of values.
+
+    The session_object_list_prop is a list that will be modified in place to store the selected values,
+    so it should be a list that is a field on a streamlit SessionObject.
+
+    You can pass kwargs to the input widget using a dict as input_widget_kwargs, and to the multiselect widget using
+    multiselect_widget_kwargs.
+
+    """
+    if not key:
+        key = label
+    if not column_layout:
+        column_layout = [0.35, 0.05, 0.6]
+
+    add_new_key = f"{key}_add_new"
+    button_key = f"{add_new_key}_button"
+
+    # Get the existing values in the list
+    def get_existing():
+        return session_object_list_prop
+
+    # Add to the list when people click on the add button after entering a new value
+    def update_existing():
+        new_val = st.session_state[add_new_key] if add_new_key in st.session_state else None
+        if new_val is not None:
+            current = get_existing()
+            if keep_duplicates or new_val not in current:
+                current.append(new_val)
+
+    # Delete from the list when people click on the segmented control
+    def delete_existing():
+        if key in st.session_state:
+            existing = st.session_state[key]
+            if current := get_existing():
+                current.remove(existing)
+
+    input_col, button_col, selected_col = st.columns(column_layout, gap="small", vertical_alignment="bottom")
+    with input_col:
+        input_widget_func(label=f"Add {label}", key=add_new_key, **(input_widget_kwargs or {}))
+    with button_col:
+        st.button(":material/add:", key=button_key, on_click=update_existing, use_container_width=True)
+    with selected_col:
+        existing_values = get_existing()
+        if existing_values:
+            st.segmented_control(label, selection_mode="single",
+                                 on_change=delete_existing,
+                                 options=existing_values, key=key, **(multiselect_widget_kwargs or {}))
+        else:
+            st.warning("No values selected")
+
+    return existing_values
