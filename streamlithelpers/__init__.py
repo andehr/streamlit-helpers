@@ -2,6 +2,7 @@ from .streamlit_helpers import (
     init_state, set_state, del_state, get_state,
     SessionObject,
     init_state_with_callable,
+    st_stateful,
 
     st_dataframe_with_download,
     st_download_button_via_file,
