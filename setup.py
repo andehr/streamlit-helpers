@@ -3,7 +3,7 @@ from distutils.core import setup
 setup(
     name='streamlithelpers',
     packages=['streamlithelpers'],
-    version='0.2.1',
+    version='0.2.2',
     license='MIT',
     description='Simple utilities to help streamlit app development',
     author='Andrew Robertson',

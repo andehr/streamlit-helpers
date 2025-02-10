@@ -175,6 +175,7 @@ class SessionObject:
         wrapper.safe_call = safe_call
         wrapper.call = call
         wrapper.history = history
+        wrapper.session_key = self.name
         return wrapper
 
 
