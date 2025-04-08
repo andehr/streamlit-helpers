@@ -127,6 +127,15 @@ class SessionObject:
                 set_state(self.name, func(*args, **kwargs))
             return get_state(self.name)
 
+        def init_with_callable(initialiser: Callable[[], T]) -> T:
+            """
+            If the current session_state value is not initialised, initialise it by calling the function passed in.
+            Either way return the now current value of the session state.
+            """
+            if self.name not in st.session_state:
+                set_state(self.name, initialiser())
+            return get_state(self.name)
+
         def clear():
             """
             Set the session_state value to None. If the value is non-None prior to clearing, then the cleanup function
@@ -170,6 +179,7 @@ class SessionObject:
 
         # Attach the helper functions to the decorated function
         wrapper.init = init
+        wrapper.init_with_callable = init_with_callable
         wrapper.clear = clear
         wrapper.get = get
         wrapper.safe_call = safe_call
