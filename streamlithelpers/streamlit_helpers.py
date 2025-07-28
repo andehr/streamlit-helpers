@@ -3,7 +3,7 @@ import os
 import tempfile
 from contextlib import contextmanager
 from functools import wraps
-from typing import TypeVar, Optional, Callable, List, Literal, Any
+from typing import TypeVar, Optional, Callable, List, Literal, Any, Generator
 
 import pandas as pd
 import streamlit as st
@@ -144,11 +144,20 @@ class SessionObject:
             safe_call(self.cleanup_func)
             set_state(self.name, None)
 
-        def get() -> T:
+
+        def delete():
+            """
+            Delete the session_state value. If the value is non-None prior to deleting, then the cleanup function
+            will be called before deleting.
+            """
+            safe_call(self.cleanup_func)
+            del_state(self.name)
+
+        def get(default_val: T | None = None) -> T:
             """
             Get the current session_state value.
             """
-            return get_state(self.name, None)
+            return get_state(self.name, default_val)
 
         def safe_call(f: Callable[[T], Any], default_value: Any = None) -> Any:
             """
@@ -181,6 +190,7 @@ class SessionObject:
         wrapper.init = init
         wrapper.init_with_callable = init_with_callable
         wrapper.clear = clear
+        wrapper.delete = delete
         wrapper.get = get
         wrapper.safe_call = safe_call
         wrapper.call = call
@@ -547,3 +557,23 @@ def st_multiselect_accepts_new(input_widget_func, label: str,
             st.warning("No values selected")
 
     return existing_values
+
+
+def st_grid(items: list[T], columns: int, separate_rows=False, **kwargs) -> Generator[T, None, None]:
+    """
+    Display a grid of items in columns
+    Usage:
+    ```
+    for item in st_grid(items, columns):
+        st.write(item)   # this will be scoped to the current grid cell
+    ```
+    """
+    grid = st.columns(columns, **kwargs)
+    col = 0
+    for item in items:
+        with grid[col]:
+            yield item
+            col = (col + 1) % columns
+        if separate_rows and col % columns == 0:
+            grid = st.columns(columns, **kwargs)
+
