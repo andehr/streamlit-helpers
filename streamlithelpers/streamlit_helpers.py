@@ -269,11 +269,15 @@ def st_stateful(widget_func, prop, obj, post_change: Callable = None, change_arg
                 kwargs["index"] = 0
                 setattr(obj, prop, kwargs.get("options")[0])
     # if the widget is a segmented control
-    elif widget_func.__name__ in {"segmented_control"}:
+    elif widget_func.__name__ in {"segmented_control", "multiselect"}:
         kwargs["default"] = getattr(obj, prop)
     # otherwise, set the value parameter of the widget directly to the value of the property of the SessionObject
     else:
         kwargs["value"] = getattr(obj, prop)
+
+    # if multiselect and options aren't provided, set them as the current value
+    if widget_func.__name__ == "multiselect" and "options" not in kwargs:
+        kwargs["options"] = getattr(obj, prop)
 
     # returns the value of the widget, and sets the value of the widget to the value of the property of the SessionObject
     return widget_func(key=session_state_key, on_change=store_prop, **kwargs)
